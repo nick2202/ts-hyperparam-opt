@@ -16,7 +16,7 @@ pip install ts-hyperparam-opt
 ## Usage
 
 ```py
-from ts-hyperparam-opt import parallel_hyperparameter_optimization as pho
+from ts_hyperparam_opt import parallel_hyperparameter_optimization as pho
 
 params_sarima = [
     [(1,1,1), (1,1,1,7)],
