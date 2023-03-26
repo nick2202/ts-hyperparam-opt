@@ -2,13 +2,14 @@ import traceback
 from math import sqrt
 
 import numpy as np
+import pandas as pd
 from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import TimeSeriesSplit
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 
 
-def optimize_hyperparams(hyperparams: list, data, func: str, n_steps=1, n_splits=10, runs_per_split=10):
+def optimize_hyperparams(hyperparams: list, data, func: str, n_steps=1, n_splits=10, runs_per_split=1):
     '''
     Convenience method for optimizing hyperparameters for time series models
     (especially in Notebooks due to having to import functions to use them parallely).
@@ -23,16 +24,19 @@ def optimize_hyperparams(hyperparams: list, data, func: str, n_steps=1, n_splits
 
     Warning: Can be computationally intensive, try with a single combination of `hyperparams` and `runs_per_split=1` first.
 
+    Can also be used for evaluating model performance using CV (use with the best hyperparameters and `runs_per_split=1`).
 
     :param hyperparams: A list/dict of one combination of hyperparameters to be tried out (look into the particular function to use for the structure it should have).
-    :param data: A DataFrame or Series with a continuous index and one column with the data.
-    :param func: String of a supported method (currently: "exp_smoothing", "sarima").
+    :param data: A DataFrame or Series with a continuous index and one column with the data (for SARIMAX has to be the first with
+    exogenous variables in other columns).
+    :param func: String of a supported method (currently: "exp_smoothing", "sarima", "sarimax).
     :param n_steps: How many steps to predict into the future.
     :param n_splits: How many CV splits to make (`len(data)` must be larger than `n_splits*n_steps`).
     :param runs_per_split: How often to repeat the prediction per split (takes average results).
     :return: The result (RMSE) for these hyperparameters.
     '''
 
+    data = pd.DataFrame(data)
     data = data.reset_index(drop=True)
     tscv = TimeSeriesSplit(n_splits = n_splits, test_size=n_steps)
 
@@ -42,13 +46,13 @@ def optimize_hyperparams(hyperparams: list, data, func: str, n_steps=1, n_splits
         rmse = list()
         for i in range(0, runs_per_split):
             try:
-                preds = globals()[func](hyperparams, cv_train, n_steps)
+                preds = globals()[func](hyperparams, cv_train, n_steps, cv_test)
             except:
                 print(hyperparams)
                 traceback.print_exc()
                 return
 
-            true_values = cv_test.values
+            true_values = cv_test.iloc[:,0].values
             rmse.append(sqrt(mean_squared_error(true_values, preds)))
 
         rmse_split.append(np.mean(rmse))
@@ -69,7 +73,7 @@ def sort_results(results_list):
     return sorted(results_list, key=lambda k: tuple(k.get(key, "") for key in sorted(k)))
 
 
-def exp_smoothing(hyperparams, cv_train, n_steps):
+def exp_smoothing(hyperparams, cv_train, n_steps, cv_test):
     return ExponentialSmoothing(
         cv_train.astype(float),
         seasonal_periods=hyperparams["periods"],
@@ -81,9 +85,18 @@ def exp_smoothing(hyperparams, cv_train, n_steps):
     ).fit(remove_bias=hyperparams["remove_bias"]).simulate(n_steps, repetitions=100, error="mul").mean(axis=1)
 
 
-def sarima(hyperparams, cv_train, n_steps):
+def sarima(hyperparams, cv_train, n_steps, cv_test):
     return SARIMAX(
         cv_train.astype(float),
         order=hyperparams[0],
         seasonal_order=hyperparams[1]
     ).fit().forecast(steps=n_steps)
+
+
+def sarimax(hyperparams, cv_train, n_steps, cv_test):
+    return SARIMAX(
+        endog=cv_train.iloc[:,0],
+        exog=cv_train.iloc[:,1:],
+        order=hyperparams[0],
+        seasonal_order=hyperparams[1]
+    ).fit().forecast(steps=n_steps, exog=cv_test.iloc[:,1:])
